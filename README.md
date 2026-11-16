@@ -20,7 +20,7 @@ it proves that by removing the patch again.
 
 ## Run it
 
-Requires PHP 8.3+ and Composer. Nothing else: no database, no API key, no Docker.
+Requires PHP 8.4.1+ and Composer. Nothing else: no database, no API key, no Docker.
 
 ```bash
 git clone https://github.com/gunnard/capsule-repeater
