@@ -135,7 +135,9 @@ and three `proc_open` calls. What the stack unlocks is the ability to run an
 which is the only configuration where the result means anything.
 
 See [`docs/pre-release-findings.md`](docs/pre-release-findings.md) for what broke
-while building against the pre-release packages.
+while building against the pre-release packages — two of which are now filed
+upstream ([php-sdk#746](https://github.com/modelcontextprotocol/php-sdk/issues/746),
+[symfony/ai#2965](https://github.com/symfony/ai/issues/2965)).
 
 ---
 
