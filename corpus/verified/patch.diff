@@ -1,0 +1,16 @@
+diff --git a/src/Counter.php b/src/Counter.php
+index 3532ab5..f0ec66f 100644
+--- a/src/Counter.php
++++ b/src/Counter.php
+@@ -5,9 +5,8 @@ namespace App;
+ 
+ final class Counter
+ {
+-    /** Off by one: the increment is dropped. */
+     public function increment(int $value): int
+     {
+-        return $value;
++        return $value + 1;
+     }
+ }
+\ No newline at end of file

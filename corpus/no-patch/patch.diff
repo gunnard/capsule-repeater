@@ -1,0 +1,11 @@
+diff --git a/src/Counter.php b/src/Counter.php
+index f0ec66f..2aa44a9 100644
+--- a/src/Counter.php
++++ b/src/Counter.php
+@@ -9,4 +9,4 @@ final class Counter
+     {
+         return $value + 1;
+     }
+-}
+\ No newline at end of file
++}

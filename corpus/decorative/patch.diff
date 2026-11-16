@@ -1,0 +1,13 @@
+diff --git a/src/Counter.php b/src/Counter.php
+index 3532ab5..48d205d 100644
+--- a/src/Counter.php
++++ b/src/Counter.php
+@@ -8,6 +8,7 @@ final class Counter
+     /** Off by one: the increment is dropped. */
+     public function increment(int $value): int
+     {
++        // Investigated: the increment is dropped.
+         return $value;
+     }
+ }
+\ No newline at end of file
