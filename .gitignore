@@ -1,8 +1,10 @@
 /vendor/
-/.env
 /var/
 .phpunit.cache/
 
-# The fixture's dependencies and cache, but not its source or its patch.
+# Local overrides only. .env is committed on purpose so a clone runs immediately.
+/.env.local
+/.env.*.local
+
 /fixtures/shipping/vendor/
 /fixtures/shipping/.phpunit.cache/

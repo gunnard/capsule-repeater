@@ -31,7 +31,7 @@ composer install
 php bin/capsule check \
   --repo=fixtures/shipping \
   --issue=fixtures/shipping/issue.md \
-  --test-command="php vendor/bin/phpunit" \
+  --test-command="php check.php" \
   --patch=fixtures/shipping/fix.patch
 ```
 
