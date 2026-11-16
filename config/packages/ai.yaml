@@ -1,19 +1,25 @@
 # ---------------------------------------------------------------------------
 # Symfony AI: the reasoning layer.
 #
-# One agent, swappable platform. The `--model` bake-off works because the
-# platform is configuration, not code.
+# One agent, swappable platform. The bake-off works because the platform is
+# configuration, not code.
 # ---------------------------------------------------------------------------
 ai:
     platform:
+        generic:
+            opencode:
+                base_url: 'https://opencode.ai/zen/v1'
+                api_key: '%env(default::OPENCODE_API_KEY)%'
         anthropic:
-            api_key: '%env(ANTHROPIC_API_KEY)%'
+            api_key: '%env(default::ANTHROPIC_API_KEY)%'
         openai:
-            api_key: '%env(OPENAI_API_KEY)%'
+            api_key: '%env(default::OPENAI_API_KEY)%'
 
     agent:
         repair:
-            platform: 'ai.platform.anthropic'
+            # OpenCode Zen (OpenAI-compatible). Switch platform in config to use
+            # Anthropic/OpenAI with the corresponding API key and model.
+            platform: 'ai.platform.generic.opencode'
             model: '%env(CAPSULE_MODEL)%'
             prompt:
                 text: 'You are a senior PHP engineer. Fix one bug, minimally, and prove it.'

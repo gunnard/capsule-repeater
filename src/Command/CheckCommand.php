@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Agent\RepairAgent;
+use App\Sandbox\Sandbox;
 use App\Verify\VerificationRunner;
 use App\Verdict\CheckResult;
 use App\Verdict\Evidence;
@@ -24,6 +26,7 @@ final class CheckCommand
 {
     public function __construct(
         private readonly VerificationRunner $runner,
+        private readonly ?RepairAgent $repairAgent = null,
     ) {}
 
     public function __invoke(
@@ -53,10 +56,13 @@ final class CheckCommand
             return Command::INVALID;
         }
 
-        if (null === $patch) {
-            $io->error('No --patch given. Model-driven patching runs through the repair agent against the MCP server; pass --patch for a deterministic run.');
+        $issueText = (string) file_get_contents($issuePath);
+        $checks = $this->runner->parseTestCommand($testCommand);
 
-            return Command::INVALID;
+        if (null === $patch) {
+            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json);
+
+            return $this->emit($io, $evidence, $json);
         }
 
         if (!is_file($patch)) {
@@ -67,13 +73,128 @@ final class CheckCommand
 
         $evidence = $this->runner->verify(
             repoPath: $repoPath,
-            issueText: (string) file_get_contents($issuePath),
+            issueText: $issueText,
             issueSource: $issue,
-            checks: $this->runner->parseTestCommand($testCommand),
+            checks: $checks,
             patchText: (string) file_get_contents($patch),
         );
 
         return $this->emit($io, $evidence, $json);
+    }
+
+    /**
+     * Model-driven path: the agent proposes by modifying a disposable copy via
+     * its MCP tools, we capture the diff, then the verifier judges it. The model
+     * never gets to declare success.
+     *
+     * @param list<array{0: string, 1: list<string>}> $checks
+     */
+    private function proposeAndVerify(
+        SymfonyStyle $io,
+        string $repoPath,
+        string $issueText,
+        string $issueSource,
+        array $checks,
+        bool $json,
+    ): Evidence {
+        if (null === $this->repairAgent) {
+            return new Evidence(
+                verdict: Verdict::Blocked,
+                baseChecks: [],
+                headChecks: [],
+                revertChecks: [],
+                summary: 'No repair agent is available.',
+                limits: ['Model-driven patching requires a configured agent and API key. Pass --patch for a deterministic run.'],
+                reason: 'no_agent',
+            );
+        }
+
+        // Pre-scan untrusted text before it reaches the model, same as verify().
+        $early = $this->runner->verify($repoPath, $issueText, $issueSource, $checks, '');
+        if (Verdict::Blocked === $early->verdict && 'prompt_injection' === $early->reason) {
+            return $early;
+        }
+
+        $work = null;
+        $previousSandbox = getenv('CAPSULE_SANDBOX') ?: null;
+
+        try {
+            $work = Sandbox::copy($repoPath);
+
+            // The MCP server subprocess reads CAPSULE_SANDBOX at boot. The client
+            // spawns it when the agent first uses a tool, so set it now.
+            $this->setSandboxEnv($work->root());
+
+            if (!$json) {
+                $io->section('Proposing a patch via MCP tools');
+            }
+
+            $context = $this->investigationContext($work);
+            $this->repairAgent->propose($issueText, $context);
+
+            $diff = $work->run('git', ['diff'], 30)->output;
+        } catch (\Throwable $e) {
+            return new Evidence(
+                verdict: Verdict::Unverified,
+                baseChecks: [],
+                headChecks: [],
+                revertChecks: [],
+                summary: 'The repair agent could not produce a verifiable patch.',
+                limits: ['Agent error: '.$e->getMessage()],
+                reason: 'agent_error',
+            );
+        } finally {
+            $this->restoreSandboxEnv($previousSandbox);
+            $work?->destroy();
+        }
+
+        if ('' === trim($diff)) {
+            // Maybe the agent committed or staged differently? check status too.
+            return new Evidence(
+                verdict: Verdict::Unverified,
+                baseChecks: [],
+                headChecks: [],
+                revertChecks: [],
+                summary: 'The agent finished without producing a diff.',
+                limits: ['No working-tree changes were captured from the agent run.'],
+                reason: 'empty_patch',
+            );
+        }
+
+        // The model proposed; the code decides.
+        return $this->runner->verify(
+            repoPath: $repoPath,
+            issueText: $issueText,
+            issueSource: $issueSource,
+            checks: $checks,
+            patchText: $diff,
+        );
+    }
+
+    private function investigationContext(Sandbox $work): string
+    {
+        $listing = $work->run('git', ['ls-files'], 30)->output;
+
+        return "Files:\n".$listing;
+    }
+
+    private function setSandboxEnv(string $root): void
+    {
+        putenv('CAPSULE_SANDBOX='.$root);
+        $_ENV['CAPSULE_SANDBOX'] = $root;
+        $_SERVER['CAPSULE_SANDBOX'] = $root;
+    }
+
+    private function restoreSandboxEnv(?string $previous): void
+    {
+        if (null === $previous) {
+            putenv('CAPSULE_SANDBOX');
+            unset($_ENV['CAPSULE_SANDBOX'], $_SERVER['CAPSULE_SANDBOX']);
+
+            return;
+        }
+
+        $this->setSandboxEnv($previous);
     }
 
     private function emit(SymfonyStyle $io, Evidence $evidence, bool $json): int

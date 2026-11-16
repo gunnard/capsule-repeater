@@ -23,8 +23,15 @@ final class Sandbox
     private const ALLOWED_BINARIES = ['php', 'composer', 'git', 'rg'];
 
     public function __construct(
-        private readonly string $root,
+        private string $root,
     ) {
+        // A runtime override lets a spawned MCP server target a specific
+        // disposable copy for one agent run, without recompiling the container.
+        $override = getenv('CAPSULE_AGENT_SANDBOX');
+        if (false !== $override && '' !== trim($override)) {
+            $root = $override;
+        }
+
         // An empty root is not "the current directory" — it is an unconfigured
         // sandbox, and the only safe thing to do with one is refuse.
         if ('' === trim($root)) {
@@ -34,6 +41,8 @@ final class Sandbox
         if (!is_dir($root)) {
             throw new SandboxViolation(\sprintf('Sandbox root is not a directory: %s', $root));
         }
+
+        $this->root = $root;
     }
 
     /**

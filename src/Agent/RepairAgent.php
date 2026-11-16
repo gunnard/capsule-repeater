@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Agent;
 
 use Symfony\AI\Agent\AgentInterface;
+use Symfony\AI\Platform\Message\Content\Text;
 use Symfony\AI\Platform\Message\MessageBag;
 use Symfony\AI\Platform\Message\SystemMessage;
 use Symfony\AI\Platform\Message\UserMessage;
@@ -44,7 +45,7 @@ final class RepairAgent
     {
         $messages = new MessageBag(
             new SystemMessage(self::SYSTEM_PROMPT),
-            new UserMessage(<<<PROMPT
+            new UserMessage(new Text(<<<PROMPT
                 Issue:
 
                 {$issue}
@@ -53,12 +54,14 @@ final class RepairAgent
 
                 {$investigationContext}
 
-                Investigate, then apply the smallest correct patch.
-                PROMPT),
+                Investigate, then apply the smallest correct patch. Use your tools to read files, apply the fix, and run the checks.
+                PROMPT)),
         );
 
         $result = $this->agent->call($messages);
 
-        return $result->getContent();
+        $content = $result->getResult()->getContent();
+
+        return \is_string($content) ? $content : json_encode($content, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
 }
