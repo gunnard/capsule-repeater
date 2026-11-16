@@ -250,3 +250,12 @@ foreach ($cases as $name => [$base, $fixes, $expected, $why]) {
 }
 
 printf("Done: %d cases\n", \count($cases));
+
+// The corpus ships as plain files, not as six nested git repositories. A nested
+// .git makes the outer repo record an empty gitlink, so a clone would receive
+// none of the case contents.
+foreach (array_keys($cases) as $name) {
+    exec('rm -rf '.escapeshellarg($root.'/'.$name.'/.git'));
+}
+
+echo "Stripped nested git repositories (the runner initialises its own copy).\n";
