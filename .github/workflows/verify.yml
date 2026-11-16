@@ -1,0 +1,69 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4', '8.5']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Test suite
+        run: composer test
+
+      - name: Corpus — every case must get the verdict it deserves
+        run: php bin/capsule suite
+
+      # The headline claim, asserted in CI: a genuine fix is VERIFIED, and a
+      # patch that cannot be proven is refused with the right exit code.
+      - name: A genuine fix is VERIFIED (exit 0)
+        run: |
+          php bin/capsule check \
+            --repo=fixtures/shipping \
+            --issue=fixtures/shipping/issue.md \
+            --test-command="php check.php" \
+            --patch=fixtures/shipping/fix.patch
+
+      - name: A decorative patch is UNVERIFIED (exit 1)
+        run: |
+          set +e
+          php bin/capsule check \
+            --repo=corpus/decorative \
+            --issue=corpus/decorative/issue.md \
+            --test-command="php check.php" \
+            --patch=corpus/decorative/patch.diff
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+
+      - name: A patch that edits the check is BLOCKED (exit 3)
+        run: |
+          set +e
+          php bin/capsule check \
+            --repo=corpus/exam-rewrite \
+            --issue=corpus/exam-rewrite/issue.md \
+            --test-command="php check.php" \
+            --patch=corpus/exam-rewrite/patch.diff
+          code=$?
+          set -e
+          test "$code" -eq 3 || { echo "expected exit 3, got $code"; exit 1; }
+
+      - name: The repository under verification is never modified
+        run: git diff --exit-code
