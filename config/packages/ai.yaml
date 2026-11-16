@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# Symfony AI: the reasoning layer.
+#
+# One agent, swappable platform. The `--model` bake-off works because the
+# platform is configuration, not code.
+# ---------------------------------------------------------------------------
+ai:
+    platform:
+        anthropic:
+            api_key: '%env(ANTHROPIC_API_KEY)%'
+        openai:
+            api_key: '%env(OPENAI_API_KEY)%'
+
+    agent:
+        repair:
+            platform: 'ai.platform.anthropic'
+            model: '%env(CAPSULE_MODEL)%'
+            prompt:
+                text: 'You are a senior PHP engineer. Fix one bug, minimally, and prove it.'
+            tools:
+                enabled: true
+                services:
+                    # The agent is an MCP *client* of this application's own MCP
+                    # server. Its capability surface is the protocol, not a
+                    # convention, which is what makes refusals enforceable.
+                    - mcp_server: 'capsule.repository'
+
+# ---------------------------------------------------------------------------
+# The official PHP MCP SDK, via symfony/mcp-bundle.
+#
+# `servers` exposes the repository tools over STDIO and HTTP.
+# `clients` is how the agent reaches them.
+# ---------------------------------------------------------------------------
+mcp:
+    servers:
+        capsule:
+            name: 'Capsule Repeater'
+            version: '0.1.0'
+            description: 'Sandboxed repository tools for verifiable AI patch repair.'
+            instructions: |
+                Every tool operates inside a disposable sandbox copy of the repository.
+                Paths outside it are refused. Binaries outside the allowlist are refused.
+                A refusal is a result, not an error: report it and stop.
+            registry:
+                tools: ['App\Mcp\Tool\']
+            transports:
+                stdio: true
+                http: true
+            http:
+                path: '/mcp/capsule'
+
+    clients:
+        capsule:
+            client_info:
+                name: 'Capsule Repeater Agent'
+                version: '0.1.0'
+            servers:
+                repository:
+                    transport: 'stdio'
+                    command:
+                        - 'php'
+                        - '%kernel.project_dir%/bin/mcp-server'

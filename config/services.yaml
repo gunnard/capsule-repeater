@@ -1,0 +1,27 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+            - '../src/Verdict/'
+            - '../src/Command/'
+
+    App\Command\:
+        resource: '../src/Command/'
+        tags: ['console.command']
+
+    # The repository the MCP tools operate on. There is deliberately no default:
+    # a sandbox rooted at the project directory would let the agent patch the
+    # tool that judges it. Set CAPSULE_SANDBOX to the repository under repair.
+    App\Sandbox\Sandbox:
+        arguments:
+            $root: '%env(CAPSULE_SANDBOX)%'
+
+    App\Verify\PatchGuard:
+        arguments:
+            $maxChangedLines: 150
+            $maxFiles: 8

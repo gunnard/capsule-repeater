@@ -1,0 +1,8 @@
+/vendor/
+/.env
+/var/
+.phpunit.cache/
+
+# The fixture's dependencies and cache, but not its source or its patch.
+/fixtures/shipping/vendor/
+/fixtures/shipping/.phpunit.cache/

@@ -1,0 +1,26 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Kernel;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
+use Symfony\Component\Dotenv\Dotenv;
+
+if (!is_file(dirname(__DIR__).'/vendor/autoload_runtime.php')) {
+    throw new RuntimeException('Run "composer install" first.');
+}
+
+require dirname(__DIR__).'/vendor/autoload_runtime.php';
+
+// A CLI tool must work from a fresh clone with no shell setup: .env is loaded
+// here rather than expected to be exported.
+return function (array $context): Application {
+    if (is_file(dirname(__DIR__).'/.env')) {
+        (new Dotenv())->usePutenv()->loadEnv(dirname(__DIR__).'/.env');
+    }
+
+    $kernel = new Kernel($context['APP_ENV'] ?? 'dev', (bool) ($context['APP_DEBUG'] ?? false));
+
+    return new Application($kernel);
+};

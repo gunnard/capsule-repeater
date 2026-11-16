@@ -1,0 +1,13 @@
+diff --git a/src/ShippingCalculator.php b/src/ShippingCalculator.php
+index 5859e4a..6b1e772 100644
+--- a/src/ShippingCalculator.php
++++ b/src/ShippingCalculator.php
+@@ -21,7 +21,7 @@ final class ShippingCalculator
+ 
+         // BUG: the threshold comparison is inverted, so free shipping is never
+         // granted and small carts are wrongly shipped for free.
+-        if ($subtotal < self::FREE_SHIPPING_THRESHOLD) {
++        if ($subtotal >= self::FREE_SHIPPING_THRESHOLD) {
+             return 0.0;
+         }
+ 
