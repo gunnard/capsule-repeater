@@ -88,7 +88,18 @@ final class CheckCommand
         $checks = $this->runner->parseTestCommand($testCommand);
 
         if (null === $patch) {
-            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json, $maxBlastRadius, $maxCost);
+            $evidence = $this->proposeAndVerify(
+                io: $io,
+                repoPath: $repoPath,
+                issueText: $issueText,
+                issueSource: $issue,
+                checks: $checks,
+                json: $json,
+                maxBlastRadius: $maxBlastRadius,
+                maxCost: $maxCost,
+                authorTests: $authorTests,
+                testCommand: $testCommand,
+            );
 
             return $this->emit($io, $evidence, $json);
         }
@@ -128,6 +139,8 @@ final class CheckCommand
         bool $json,
         int $maxBlastRadius = 0,
         float $maxCost = 0.0,
+        bool $authorTests = false,
+        string $testCommand = '',
     ): Evidence {
         if (null === $this->repairAgent) {
             return new Evidence(
@@ -149,6 +162,9 @@ final class CheckCommand
 
         $work = null;
         $previousSandbox = getenv('CAPSULE_SANDBOX') ?: null;
+        $reproduction = null;
+        $startedAt = microtime(true);
+        $elapsed = static fn (): float => microtime(true) - $startedAt;
 
         try {
             $work = Sandbox::copy($repoPath);
@@ -169,7 +185,7 @@ final class CheckCommand
                 }
 
                 $testRoot = $this->detectTestRoot($work);
-                $result = $this->testAuthor->author($work, $issueText, $testRoot);
+                $result = $this->testAuthor->author($work, $issueText, $testRoot, $testCommand);
 
                 if (!$result->success) {
                     return new Evidence(
@@ -180,12 +196,27 @@ final class CheckCommand
                         summary: 'Could not author a reproduction test.',
                         limits: [$result->message],
                         reason: $result->reason,
+                        cost: $this->repairAgent->meter()->cost(),
+                        meter: $this->repairAgent->meter(),
+                        wallTime: $elapsed(),
                     );
                 }
 
+                $reproduction = $result->reproduction;
+
                 if (!$json) {
-                    $io->writeln('  ✓ '.$result->message);
+                    $io->writeln('  <info>✓</info> '.$result->message);
+                    $io->writeln(\sprintf('    <comment>baseline:</comment> %s', $this->firstLine($result->baselineOutput)));
                 }
+
+                // Fold the authored test into the sandbox baseline. It is part of
+                // the specification, not of the patch, so it must never show up in
+                // the diff the model is judged on.
+                $this->commitBaseline($work);
+            }
+
+            if ($this->repairAgent->exceedsCost($maxCost)) {
+                return $this->costEvidence($this->repairAgent, $maxCost, 'after authoring the reproduction');
             }
 
             if (!$json) {
@@ -193,9 +224,13 @@ final class CheckCommand
             }
 
             $context = $this->investigationContext($work);
-            $this->repairAgent->propose($issueText, $context);
+            $reply = $this->repairAgent->propose($issueText, $context);
 
-            $diff = $work->run('git', ['diff'], 30)->output;
+            // Stage everything first: `git diff` alone silently ignores files the
+            // agent created, which is exactly how a model's new file can vanish
+            // from a patch and get judged as "no change".
+            $work->run('git', ['add', '-A'], 30);
+            $diff = $work->run('git', ['diff', '--cached'], 30)->output;
         } catch (\Throwable $e) {
             return new Evidence(
                 verdict: Verdict::Unverified,
@@ -205,6 +240,9 @@ final class CheckCommand
                 summary: 'The repair agent could not produce a verifiable patch.',
                 limits: ['Agent error: '.$e->getMessage()],
                 reason: 'agent_error',
+                cost: $this->repairAgent->meter()->cost(),
+                meter: $this->repairAgent->meter(),
+                wallTime: $elapsed(),
             );
         } finally {
             putenv('CAPSULE_AGENT_SANDBOX');
@@ -214,20 +252,27 @@ final class CheckCommand
         }
 
         if ('' === trim($diff)) {
-            // Maybe the agent committed or staged differently? check status too.
             return new Evidence(
                 verdict: Verdict::Unverified,
                 baseChecks: [],
                 headChecks: [],
                 revertChecks: [],
                 summary: 'The agent finished without producing a diff.',
-                limits: ['No working-tree changes were captured from the agent run.'],
+                limits: [
+                    'No working-tree changes were captured from the agent run.',
+                    'The model said: '.$this->shorten($reply),
+                    ...array_map($this->shorten(...), $this->repairAgent->transcript()),
+                ],
                 reason: 'empty_patch',
+                cost: $this->repairAgent->meter()->cost(),
+                meter: $this->repairAgent->meter(),
+                reproductionPath: $reproduction?->path,
+                wallTime: $elapsed(),
             );
         }
 
         // The model proposed; the code decides.
-        return $this->runner->verify(
+        $evidence = $this->runner->verify(
             repoPath: $repoPath,
             issueText: $issueText,
             issueSource: $issueSource,
@@ -235,7 +280,88 @@ final class CheckCommand
             patchText: $diff,
             maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
             maxCost: $maxCost,
+            reproduction: $reproduction,
+            meter: $this->repairAgent->meter(),
         );
+
+        // The verifier only measures its own run; the model's thinking time is
+        // part of what this verdict cost, so report the whole span.
+        return new Evidence(
+            verdict: $evidence->verdict,
+            baseChecks: $evidence->baseChecks,
+            headChecks: $evidence->headChecks,
+            revertChecks: $evidence->revertChecks,
+            summary: $evidence->summary,
+            limits: $evidence->limits,
+            blastRadius: $evidence->blastRadius,
+            diff: $evidence->diff,
+            reason: $evidence->reason,
+            cost: $evidence->cost,
+            wallTime: $elapsed(),
+            meter: $evidence->meter,
+            reproductionPath: $evidence->reproductionPath,
+        );
+    }
+
+    /**
+     * Fold the authored test into the sandbox's baseline commit, so it is part
+     * of the repository rather than part of the proposed change.
+     */
+    private function commitBaseline(Sandbox $work): void
+    {
+        $work->run('git', ['add', '-A'], 30);
+        $work->run('git', [
+            '-c', 'user.email=capsule@localhost',
+            '-c', 'user.name=Capsule',
+            'commit', '-q', '-m', 'authored reproduction',
+        ], 30);
+    }
+
+    /**
+     * A refusal caused by spending too much, as evidence rather than an exception.
+     */
+    private function costEvidence(RepairAgent $agent, float $ceiling, string $stage): Evidence
+    {
+        $meter = $agent->meter();
+
+        return new Evidence(
+            verdict: Verdict::Blocked,
+            baseChecks: [],
+            headChecks: [],
+            revertChecks: [],
+            summary: \sprintf('Refused: the cost ceiling was reached %s.', $stage),
+            limits: [\sprintf(
+                'Spent $%.6f across %d call(s) (%d tokens) against a ceiling of $%.6f.',
+                $meter->cost(),
+                $meter->calls(),
+                $meter->totalTokens(),
+                $ceiling,
+            )],
+            reason: 'cost_exceeded',
+            cost: $meter->cost(),
+            meter: $meter,
+        );
+    }
+
+    private function firstLine(string $text): string
+    {
+        $line = trim(strtok($text, "\n") ?: '');
+
+        return '' === $line ? '(no output)' : $line;
+    }
+
+    /**
+     * A model reply, trimmed to something that fits in an evidence limit.
+     */
+    private function shorten(string $text, int $limit = 300): string
+    {
+        $text = trim(preg_replace('/\s+/', ' ', $text) ?? '');
+
+        if ('' === $text) {
+            return '(nothing)';
+        }
+
+        return \strlen($text) <= $limit ? $text : substr($text, 0, $limit).'…';
     }
 
     private function detectTestRoot(Sandbox $work): string
@@ -301,7 +427,14 @@ final class CheckCommand
             ['Verdict' => $evidence->verdict->value],
             ['Meaning' => $evidence->verdict->humanLabel()],
             ['Load-bearing' => $evidence->isLoadBearing() ? 'yes' : 'no'],
+            ['Cost' => $this->renderCost($evidence)],
+            ['Wall time' => \sprintf('%.2fs', $evidence->wallTime)],
         );
+
+        if (null !== $evidence->reproductionPath) {
+            $io->section('Reproduction');
+            $io->writeln(\sprintf('  Authored before patching: <info>%s</info>', $evidence->reproductionPath));
+        }
 
         $this->renderChecks($io, 'Base (must fail)', $evidence->baseChecks);
         $this->renderChecks($io, 'Head (must pass)', $evidence->headChecks);
@@ -315,6 +448,32 @@ final class CheckCommand
         if (Verdict::Verified === $evidence->verdict) {
             $io->success('Proven: the patch is what makes the checks pass.');
         }
+    }
+
+    /**
+     * Cost is reported, not implied: "$0.000000" on a deterministic run means no
+     * model was called, and an unmeasured model run says so rather than claiming
+     * to have been free.
+     */
+    private function renderCost(Evidence $evidence): string
+    {
+        $meter = $evidence->meter;
+
+        if (null === $meter || 0 === $meter->calls()) {
+            return 'none (no model called)';
+        }
+
+        if (0.0 === $meter->cost()) {
+            return \sprintf('%d call(s), usage not reported by the provider', $meter->calls());
+        }
+
+        return \sprintf(
+            '$%.6f (%d call(s), %d tokens%s)',
+            $meter->cost(),
+            $meter->calls(),
+            $meter->totalTokens(),
+            null !== $meter->model() ? ', '.$meter->model() : '',
+        );
     }
 
     /** @param list<CheckResult> $results */

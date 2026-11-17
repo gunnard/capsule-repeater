@@ -76,11 +76,13 @@ final class SuiteCommand
                 $result['expected'],
                 $result['actual'],
                 $result['match'] ? '<info>ok</info>' : '<error>MISMATCH</error>',
+                $result['cost'],
+                $result['time'],
                 $result['note'],
             ];
         }
 
-        $io->table(['Case', 'Expected', 'Actual', '', 'Why'], $rows);
+        $io->table(['Case', 'Expected', 'Actual', '', 'Cost', 'Time', 'Why'], $rows);
 
         $io->definitionList(
             ['Score' => \sprintf('%d/%d', \count($passed), \count($results))],
@@ -157,6 +159,10 @@ final class SuiteCommand
             'actual' => $evidence->verdict->value,
             'match' => $evidence->verdict->value === $case['expected'],
             'note' => $case['note'],
+            'cost' => null === $evidence->meter
+                ? '—'
+                : \sprintf('$%.6f', $evidence->cost),
+            'time' => \sprintf('%.2fs', $evidence->wallTime),
             'limits' => $this->summarise($evidence),
         ];
     }

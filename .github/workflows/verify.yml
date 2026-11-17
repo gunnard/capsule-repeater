@@ -65,5 +65,45 @@ jobs:
           set -e
           test "$code" -eq 3 || { echo "expected exit 3, got $code"; exit 1; }
 
+      # The v2 features, asserted rather than described.
+      - name: The test command is discovered from repository config
+        run: |
+          php bin/capsule check \
+            --repo=fixtures/shipping \
+            --issue=fixtures/shipping/issue.md \
+            --auto-discover \
+            --patch=fixtures/shipping/fix.patch
+
+      - name: A blast radius over the threshold is BLOCKED (exit 3)
+        run: |
+          set +e
+          php bin/capsule check \
+            --repo=fixtures/shipping \
+            --issue=fixtures/shipping/issue.md \
+            --test-command="php check.php" \
+            --patch=fixtures/shipping/fix.patch \
+            --max-blast-radius=1
+          code=$?
+          set -e
+          test "$code" -eq 3 || { echo "expected exit 3, got $code"; exit 1; }
+
+      - name: Blast radius and cost are reported in the evidence
+        run: |
+          php bin/capsule check \
+            --repo=fixtures/shipping \
+            --issue=fixtures/shipping/issue.md \
+            --test-command="php check.php" \
+            --patch=fixtures/shipping/fix.patch \
+            --json > evidence.json
+          php -r '
+            $e = json_decode(file_get_contents("evidence.json"), true, 512, JSON_THROW_ON_ERROR);
+            assert("VERIFIED" === $e["verdict"]);
+            assert(3 === $e["blastRadius"]["totalConsumers"]);
+            assert(array_key_exists("cost", $e));
+            assert(array_key_exists("wallTime", $e));
+            assert($e["wallTime"] > 0);
+            echo "evidence shape ok\n";
+          '
+
       - name: The repository under verification is never modified
         run: git diff --exit-code

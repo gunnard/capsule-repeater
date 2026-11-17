@@ -43,14 +43,55 @@ head PASS, revert FAIL.
 php bin/capsule suite
 ```
 
-Expected: `6/6`, including four cases that must *not* be `VERIFIED`.
+Expected: `6/6`, including five cases that must *not* be `VERIFIED`.
 
 ```bash
 # Its own test suite
 composer test
 ```
 
-Expected: `36 tests, 65 assertions`, all passing.
+Expected: `80 tests, 160 assertions`, all passing.
+
+---
+
+## The model path
+
+The deterministic run above takes a patch as input. Without `--patch`, the gate
+asks a model to write the fix, and judges it the same way.
+
+```bash
+export OPENAI_API_KEY=sk-...
+export CAPSULE_MODEL=gpt-4o   # gpt-4o-mini is cheaper but does not complete this task
+
+php bin/capsule check \
+  --repo=fixtures/shipping \
+  --issue=fixtures/shipping/issue.md \
+  --test-command="php check.php" \
+  --author-tests
+```
+
+`--author-tests` is the TDD gate. Before the model is allowed to patch anything,
+it must write a test that **fails on the unpatched code**. That test is then
+installed in the sandbox for all three phases, so the differential proof runs
+against a reproduction neither the model nor the patch can touch. The authored
+test is deliberately kept out of the diff: if it travelled with the patch,
+reverting the patch would delete the test and the revert phase would fail for
+the wrong reason.
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--patch=FILE` | Verify this patch deterministically; no model is called |
+| `--author-tests` | Require a failing reproduction before patching (model-driven) |
+| `--auto-discover` | Detect the test command from the repository's own config |
+| `--max-blast-radius=N` | `BLOCKED` if the patch touches more than N consumers |
+| `--max-cost=USD` | `BLOCKED` once measured spend passes the ceiling |
+| `--json` | Full evidence as JSON, including token usage and cost |
+
+Cost and wall time are informational unless a ceiling is passed; they are
+reported either way, because a verification run that costs $0.04 and one that
+costs nothing are different claims.
 
 ---
 

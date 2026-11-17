@@ -31,6 +31,10 @@ services:
         arguments:
             $agent: '@ai.agent.repair'
 
+    App\Agent\CostMeter: ~
+
+    App\Agent\ModelPricing: ~
+
     App\Phase\TestAuthorPhase:
         arguments:
             $agent: '@App\Agent\RepairAgent'
