@@ -42,7 +42,16 @@ final class Sandbox
             throw new SandboxViolation(\sprintf('Sandbox root is not a directory: %s', $root));
         }
 
-        $this->root = $root;
+        // Normalise once, here. `resolve()` returns realpath()-ed paths, and on
+        // macOS `/var` is a symlink to `/private/var`; storing the un-normalised
+        // root meant every "strip the root prefix" computation missed by
+        // `/private` and produced paths like `/privatesrc/Foo.php`.
+        $real = realpath($root);
+        if (false === $real) {
+            throw new SandboxViolation(\sprintf('Sandbox root is not readable: %s', $root));
+        }
+
+        $this->root = rtrim($real, '/');
     }
 
     /**
@@ -167,9 +176,80 @@ final class Sandbox
 
     public function write(string $relative, string $contents): void
     {
+        // A new test usually lands in a directory that does not exist yet
+        // (`tests/`), so create it rather than refusing to write.
+        $this->mkdir(\dirname($relative));
+
         $path = $this->resolve($relative);
         if (false === file_put_contents($path, $contents)) {
             throw new SandboxViolation(\sprintf('Unwritable: %s', $relative));
+        }
+    }
+
+    /**
+     * Create a directory inside the sandbox, including any missing parents.
+     *
+     * Each segment is resolved as it is created, so a symlink planted mid-path
+     * cannot be used to walk out of the sandbox.
+     */
+    public function mkdir(string $relative): void
+    {
+        $relative = ltrim($relative, '/');
+
+        if ('' === $relative || '.' === $relative) {
+            return;
+        }
+
+        if (str_contains($relative, "\0")) {
+            throw new SandboxViolation('Path contains a null byte.');
+        }
+
+        $real = realpath($this->root);
+        if (false === $real) {
+            throw new SandboxViolation('Sandbox root is not readable.');
+        }
+
+        foreach (explode('/', $relative) as $segment) {
+            if ('' === $segment || '.' === $segment) {
+                continue;
+            }
+
+            if ('..' === $segment) {
+                throw new SandboxViolation(\sprintf('Path escapes the sandbox: %s', $relative));
+            }
+
+            $real .= '/'.$segment;
+
+            if (!is_dir($real) && !mkdir($real, 0o755) && !is_dir($real)) {
+                throw new SandboxViolation(\sprintf('Could not create directory: %s', $relative));
+            }
+
+            $resolved = realpath($real);
+            $rootReal = realpath($this->root);
+            if (false === $resolved || false === $rootReal) {
+                throw new SandboxViolation(\sprintf('Path does not exist: %s', $relative));
+            }
+
+            if ($resolved !== $rootReal && !str_starts_with($resolved, $rootReal.'/')) {
+                throw new SandboxViolation(\sprintf('Path escapes the sandbox: %s', $relative));
+            }
+
+            $real = $resolved;
+        }
+    }
+
+    /**
+     * Delete a file inside the sandbox.
+     *
+     * Needed to discard an authored test: `git checkout --` cannot undo a file
+     * that was never tracked, which is exactly what a fresh test always is.
+     */
+    public function remove(string $relative): void
+    {
+        $path = $this->resolve($relative);
+
+        if (is_file($path) && !unlink($path)) {
+            throw new SandboxViolation(\sprintf('Could not remove: %s', $relative));
         }
     }
 
@@ -260,7 +340,10 @@ final class Sandbox
         fclose($pipes[2]);
         $exitCode = proc_close($process);
 
-        return new CheckResult($command, $exitCode, trim($output));
+        // Do NOT trim: a unified diff is only valid with its trailing newline,
+        // and `git apply` reports a stripped diff as "corrupt patch". Consumers
+        // that want a trimmed value trim it themselves.
+        return new CheckResult($command, $exitCode, $output);
     }
 
     /**
