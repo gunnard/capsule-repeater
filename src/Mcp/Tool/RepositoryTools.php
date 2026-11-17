@@ -112,6 +112,49 @@ final class RepositoryTools
     }
 
     /**
+     * Replace the entire contents of an existing file.
+     *
+     * Unified diffs are a poor interface for a language model: it has to
+     * reproduce surrounding context lines byte-for-byte, and one wrong space
+     * makes the whole patch unapplicable even when the fix is correct. Writing
+     * the file is what the model actually means, and the verifier judges the
+     * resulting diff either way — so nothing is lost by making this easier.
+     *
+     * New files are refused: a fix creates a change to existing source, not
+     * extra files, and an unbounded file-creation primitive is a blast radius.
+     */
+    #[McpTool(name: 'repo_write_file', title: 'Replace the contents of an existing file')]
+    public function writeFile(string $path, string $content): array
+    {
+        try {
+            $this->sandbox->resolve($path);
+        } catch (SandboxViolation) {
+            return ['written' => false, 'message' => \sprintf('Refused: %s escapes the sandbox.', $path)];
+        }
+
+        if (!$this->sandbox->exists($path)) {
+            return [
+                'written' => false,
+                'message' => \sprintf('Refused: %s does not exist. This tool edits existing files only.', $path),
+            ];
+        }
+
+        $before = $this->sandbox->read($path);
+
+        if ($before === $content) {
+            return ['written' => false, 'message' => 'No change: the file already has that content.'];
+        }
+
+        $this->sandbox->write($path, $content);
+
+        return [
+            'written' => true,
+            'message' => 'File written.',
+            'path' => $path,
+        ];
+    }
+
+    /**
      * Get the current working-tree status.
      *
      * @return array{clean: bool, entries: list<string>}
@@ -183,12 +226,16 @@ final class RepositoryTools
         file_put_contents($patchFile, $patch);
 
         try {
-            $check = $this->sandbox->run('git', ['apply', '--check', $patchFile], 30);
+            // `--recount` forgives wrong hunk line counts, which is the most
+            // common way a model-written diff is malformed: the change is right,
+            // the @@ header is not. Forgiving that is not leniency about the fix,
+            // because the differential proof still has to pass.
+            $check = $this->sandbox->run('git', ['apply', '--recount', '--check', $patchFile], 30);
             if ($check->failed()) {
                 return ['applied' => false, 'message' => 'Patch does not apply cleanly: '.$check->output];
             }
 
-            $apply = $this->sandbox->run('git', ['apply', $patchFile], 30);
+            $apply = $this->sandbox->run('git', ['apply', '--recount', $patchFile], 30);
             if ($apply->failed()) {
                 return ['applied' => false, 'message' => 'Patch application failed: '.$apply->output];
             }
