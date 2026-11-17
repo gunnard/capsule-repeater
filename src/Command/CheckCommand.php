@@ -35,25 +35,50 @@ final class CheckCommand
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Option(description: 'Repository to verify')]
-        string $repo = '.',
-        #[Option(description: 'Path to the issue description')]
-        string $issue = 'issue.md',
-        #[Option(description: 'Test command, e.g. "php vendor/bin/phpunit"')]
-        string $testCommand = 'php vendor/bin/phpunit',
-        #[Option(description: 'Emit JSON evidence instead of text')]
+        #[Option(description: 'Repository to verify', shortcut: 'r')]
+        ?string $repo = null,
+        #[Option(description: 'Path to the issue description (auto-detected if omitted)', shortcut: 'i')]
+        ?string $issue = null,
+        #[Option(description: 'Test command, e.g. "php vendor/bin/phpunit" (auto-discovered if omitted)', shortcut: 't')]
+        ?string $testCommand = null,
+        #[Option(description: 'Emit JSON evidence instead of text', shortcut: 'j')]
         bool $json = false,
-        #[Option(description: 'Apply this patch file instead of asking a model')]
+        #[Option(description: 'Apply this patch file instead of asking a model', shortcut: 'p')]
         ?string $patch = null,
-        #[Option(description: 'Block if the patch touches more than N consumers (0 = unlimited)')]
+        #[Option(description: 'Block if the patch touches more than N consumers (0 = unlimited)', shortcut: 'b')]
         int $maxBlastRadius = 0,
-        #[Option(description: 'Abort if estimated cost exceeds N dollars (0 = unlimited)')]
+        #[Option(description: 'Abort if estimated cost exceeds N dollars (0 = unlimited)', shortcut: 'm')]
         float $maxCost = 0.0,
-        #[Option(description: 'Author a reproduction test before patching (model-driven)')]
+        #[Option(description: 'Author a reproduction test before patching (model-driven)', shortcut: 'a')]
         bool $authorTests = false,
-        #[Option(description: 'Auto-detect the test command from repository config')]
-        bool $autoDiscover = false,
+        #[Option(description: 'Auto-detect the test command from repository config (now the default)', shortcut: 'd')]
+        bool $autoDiscover = true,
     ): int {
+        // A .capsule.yaml in the working tree supplies defaults; flags always win.
+        $config = $this->loadConfig(getcwd() ?: '.');
+
+        if (null === $repo) {
+            $repo = $config['repo'] ?? '.';
+        }
+        if (null === $issue) {
+            $issue = $config['issue'] ?? null;
+        }
+        if (null === $testCommand) {
+            $testCommand = $config['test_command'] ?? null;
+        }
+        if (null === $patch && isset($config['patch'])) {
+            $patch = (string) $config['patch'];
+        }
+        if (0 === $maxBlastRadius && isset($config['max_blast_radius'])) {
+            $maxBlastRadius = (int) $config['max_blast_radius'];
+        }
+        if (0.0 === $maxCost && isset($config['max_cost'])) {
+            $maxCost = (float) $config['max_cost'];
+        }
+        if (!$authorTests && isset($config['author_tests'])) {
+            $authorTests = (bool) $config['author_tests'];
+        }
+
         $repoPath = realpath($repo);
         if (false === $repoPath || !is_dir($repoPath)) {
             $io->error(\sprintf('Not a directory: %s', $repo));
@@ -61,7 +86,21 @@ final class CheckCommand
             return Command::INVALID;
         }
 
+        // Issue file: explicit, then config, then auto-detect in the repo.
+        if (null === $issue) {
+            $issue = $this->detectIssue($repoPath);
+        }
+        if (null === $issue) {
+            $io->error('No issue file found. Pass --issue or create issue.md in the repository.');
+
+            return Command::INVALID;
+        }
+
         $issuePath = realpath($issue);
+        if (false === $issuePath || !is_file($issuePath)) {
+            // Maybe relative to the repo.
+            $issuePath = realpath($repoPath.'/'.ltrim($issue, '/'));
+        }
         if (false === $issuePath || !is_file($issuePath)) {
             $io->error(\sprintf('No such issue file: %s', $issue));
 
@@ -69,19 +108,33 @@ final class CheckCommand
         }
 
         $issueText = (string) file_get_contents($issuePath);
+        $issueSource = $issuePath;
 
-        // Auto-discover the test command if requested.
-        if ($autoDiscover && null !== $this->testDiscovery) {
-            $sandbox = new \App\Sandbox\Sandbox($repoPath);
-            $discovered = $this->testDiscovery->discover($sandbox);
-            if (null === $discovered) {
+        // Test command: explicit, then config, then auto-discover, then a sane default.
+        if (null === $testCommand) {
+            if (null !== $this->testDiscovery) {
+                $sandbox = new \App\Sandbox\Sandbox($repoPath);
+                $discovered = $this->testDiscovery->discover($sandbox);
+                if (null !== $discovered) {
+                    $testCommand = $discovered;
+                    if (!$json) {
+                        $io->writeln(\sprintf('<comment>Discovered test command: %s</comment>', $testCommand));
+                    }
+                }
+            }
+        }
+
+        if (null === $testCommand) {
+            // Fall back to a check.php if present, otherwise require an explicit command.
+            if (is_file($repoPath.'/check.php')) {
+                $testCommand = 'php check.php';
+                if (!$json) {
+                    $io->writeln('<comment>Using default test command: php check.php</comment>');
+                }
+            } else {
                 $io->error('Could not discover a test command. Pass --test-command explicitly.');
 
                 return Command::INVALID;
-            }
-            $testCommand = $discovered;
-            if (!$json) {
-                $io->writeln(\sprintf('<comment>Discovered test command: %s</comment>', $testCommand));
             }
         }
 
@@ -92,7 +145,7 @@ final class CheckCommand
                 io: $io,
                 repoPath: $repoPath,
                 issueText: $issueText,
-                issueSource: $issue,
+                issueSource: $issueSource,
                 checks: $checks,
                 json: $json,
                 maxBlastRadius: $maxBlastRadius,
@@ -113,7 +166,7 @@ final class CheckCommand
         $evidence = $this->runner->verify(
             repoPath: $repoPath,
             issueText: $issueText,
-            issueSource: $issue,
+            issueSource: $issueSource,
             checks: $checks,
             patchText: (string) file_get_contents($patch),
             maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
@@ -406,6 +459,55 @@ final class CheckCommand
         }
 
         $this->setSandboxEnv($previous);
+    }
+
+    /**
+     * Load defaults from a .capsule.yaml / .capsule.yml file.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadConfig(string $dir): array
+    {
+        foreach (['.capsule.yaml', '.capsule.yml', '.capsule.json'] as $name) {
+            $path = $dir.'/'.$name;
+            if (!is_file($path)) {
+                continue;
+            }
+
+            try {
+                if (str_ends_with($name, '.json')) {
+                    $data = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+                } else {
+                    $data = \Symfony\Component\Yaml\Yaml::parseFile($path);
+                }
+            } catch (\Throwable) {
+                return [];
+            }
+
+            return \is_array($data) ? $data : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * Find an issue file in the repository when none was given.
+     */
+    private function detectIssue(string $repoPath): ?string
+    {
+        foreach (['issue.md', 'ISSUE.md', 'issue.txt', 'ISSUE.txt'] as $name) {
+            if (is_file($repoPath.'/'.$name)) {
+                return $repoPath.'/'.$name;
+            }
+        }
+
+        foreach (glob($repoPath.'/.github/ISSUE*') ?: [] as $file) {
+            if (is_file($file)) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 
     private function emit(SymfonyStyle $io, Evidence $evidence, bool $json): int

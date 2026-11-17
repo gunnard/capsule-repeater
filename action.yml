@@ -1,0 +1,72 @@
+name: 'Capsule Repeater'
+description: 'Verification gate for AI-written patches. Runs the differential proof (base FAIL -> head PASS -> revert FAIL) and emits a machine-checkable verdict.'
+author: 'gunnard'
+
+inputs:
+  repo:
+    description: 'Repository path to verify (relative to the workspace).'
+    required: false
+    default: '.'
+  issue:
+    description: 'Path to the issue description file.'
+    required: false
+    default: 'issue.md'
+  test-command:
+    description: 'Test command, e.g. "php vendor/bin/phpunit".'
+    required: false
+    default: ''
+  patch:
+    description: 'Path to a patch file to verify deterministically. If omitted, the model path is used (requires OPENAI_API_KEY).'
+    required: false
+    default: ''
+  max-blast-radius:
+    description: 'Block if the patch touches more than N consumers (0 = unlimited).'
+    required: false
+    default: '0'
+  max-cost:
+    description: 'Block once measured spend passes this USD ceiling (0 = unlimited).'
+    required: false
+    default: '0'
+  author-tests:
+    description: 'Author a reproduction test before patching (model-driven).'
+    required: false
+    default: 'false'
+  php-version:
+    description: 'PHP version to use.'
+    required: false
+    default: '8.4'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ inputs.php-version }}
+        coverage: none
+
+    - name: Install Capsule Repeater
+      shell: bash
+      run: |
+        if [ ! -f bin/capsule ]; then
+          git clone --depth 1 https://github.com/gunnard/capsule-repeater.git /tmp/capsule-repeater
+        fi
+        cd /tmp/capsule-repeater 2>/dev/null || cd .
+        composer install --no-interaction --prefer-dist --quiet
+
+    - name: Run the gate
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+        CAPSULE_MODEL: ${{ env.CAPSULE_MODEL }}
+      run: |
+        CAPSULE=/tmp/capsule-repeater
+        [ -f ./bin/capsule ] && CAPSULE=.
+        ARGS=(check --repo="${{ inputs.repo }}" --json)
+        [ -n "${{ inputs.issue }}" ] && ARGS+=(--issue="${{ inputs.issue }}")
+        [ -n "${{ inputs.test-command }}" ] && ARGS+=(--test-command="${{ inputs.test-command }}")
+        [ -n "${{ inputs.patch }}" ] && ARGS+=(--patch="${{ inputs.patch }}")
+        [ "${{ inputs.max-blast-radius }}" != "0" ] && ARGS+=(--max-blast-radius="${{ inputs.max-blast-radius }}")
+        [ "${{ inputs.max-cost }}" != "0" ] && ARGS+=(--max-cost="${{ inputs.max-cost }}")
+        [ "${{ inputs.author-tests }}" = "true" ] && ARGS+=(--author-tests)
+        "$CAPSULE/bin/capsule" "${ARGS[@]}"
