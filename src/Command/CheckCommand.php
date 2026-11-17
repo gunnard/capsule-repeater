@@ -43,6 +43,8 @@ final class CheckCommand
         ?string $patch = null,
         #[Option(description: 'Block if the patch touches more than N consumers (0 = unlimited)')]
         int $maxBlastRadius = 0,
+        #[Option(description: 'Abort if estimated cost exceeds N dollars (0 = unlimited)')]
+        float $maxCost = 0.0,
     ): int {
         $repoPath = realpath($repo);
         if (false === $repoPath || !is_dir($repoPath)) {
@@ -62,7 +64,7 @@ final class CheckCommand
         $checks = $this->runner->parseTestCommand($testCommand);
 
         if (null === $patch) {
-            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json, $maxBlastRadius);
+            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json, $maxBlastRadius, $maxCost);
 
             return $this->emit($io, $evidence, $json);
         }
@@ -80,6 +82,7 @@ final class CheckCommand
             checks: $checks,
             patchText: (string) file_get_contents($patch),
             maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
+            maxCost: $maxCost,
         );
 
         return $this->emit($io, $evidence, $json);
@@ -100,6 +103,7 @@ final class CheckCommand
         array $checks,
         bool $json,
         int $maxBlastRadius = 0,
+        float $maxCost = 0.0,
     ): Evidence {
         if (null === $this->repairAgent) {
             return new Evidence(
@@ -180,6 +184,7 @@ final class CheckCommand
             checks: $checks,
             patchText: $diff,
             maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
+            maxCost: $maxCost,
         );
     }
 

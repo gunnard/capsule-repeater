@@ -28,6 +28,8 @@ final readonly class Evidence
         public ?\App\Verify\BlastRadiusReport $blastRadius = null,
         public ?string $diff = null,
         public ?string $reason = null,
+        public float $cost = 0.0,
+        public float $wallTime = 0.0,
     ) {}
 
     /**
@@ -87,6 +89,8 @@ final readonly class Evidence
             'blastRadius' => $this->blastRadius?->toArray(),
             'limits' => $this->limits,
             'diff' => $this->diff,
+            'cost' => $this->cost,
+            'wallTime' => $this->wallTime,
         ];
     }
 }

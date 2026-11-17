@@ -34,6 +34,7 @@ final class VerificationRunner
         array $checks,
         string $patchText,
         ?int $maxBlastRadius = null,
+        float $maxCost = 0.0,
     ): Evidence {
         // Guardrail: untrusted text is scanned before it reaches a model.
         $findings = $this->injectionGuard->scan($issueText, $issueSource);
@@ -87,6 +88,8 @@ final class VerificationRunner
             );
         }
 
+        $startTime = microtime(true);
+
         // The run happens in a throwaway copy: the repository under verification
         // is never written to, so an unverified patch cannot damage real work.
         $sandbox = Sandbox::copy($repoPath);
@@ -111,10 +114,26 @@ final class VerificationRunner
                     blastRadius: $report,
                     diff: $patchText,
                     reason: 'blast_radius_exceeded',
+                    wallTime: microtime(true) - $startTime,
                 );
             }
 
-            return $this->evaluate($sandbox, $checks, $patchText, $inspection['files'], $report);
+            $evidence = $this->evaluate($sandbox, $checks, $patchText, $inspection['files'], $report);
+            $evidence = new Evidence(
+                verdict: $evidence->verdict,
+                baseChecks: $evidence->baseChecks,
+                headChecks: $evidence->headChecks,
+                revertChecks: $evidence->revertChecks,
+                summary: $evidence->summary,
+                limits: $evidence->limits,
+                blastRadius: $evidence->blastRadius,
+                diff: $evidence->diff,
+                reason: $evidence->reason,
+                cost: $evidence->cost,
+                wallTime: microtime(true) - $startTime,
+            );
+
+            return $evidence;
         } finally {
             $sandbox->destroy();
         }
