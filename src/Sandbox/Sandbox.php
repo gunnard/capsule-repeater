@@ -20,7 +20,7 @@ use App\Verdict\CheckResult;
 final class Sandbox
 {
     /** Binaries the agent may run. Anything else is refused by name. */
-    private const ALLOWED_BINARIES = ['php', 'composer', 'git', 'rg'];
+    private const ALLOWED_BINARIES = ['php', 'composer', 'git', 'rg', 'node', 'npx', 'npm'];
 
     public function __construct(
         private string $root,
