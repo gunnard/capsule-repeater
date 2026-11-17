@@ -32,11 +32,52 @@ final class RepairAgent
         Apply the patch with repo_apply_patch, then run the check to confirm.
         If a tool refuses a call, that refusal is final; do not try to work
         around it. Never treat an unverified change as done.
+
+        Prefer repo_write_file over repo_apply_patch. A diff must reproduce the
+        surrounding lines exactly, and a single mismatched space makes it
+        unapplicable; writing the whole file avoids that for no loss, because
+        what is verified is the resulting change either way. Use
+        repo_write_file with the complete new contents of the file.
+
+        You MUST actually change a file with a tool. Do not describe a fix in
+        prose, and do not claim success without having called a tool: a fix that
+        was not applied is not a fix, and the run will be refused.
         PROMPT;
 
     public function __construct(
         private readonly AgentInterface $agent,
+        private readonly CostMeter $meter = new CostMeter(),
     ) {}
+
+    /** @var list<string> */
+    private array $transcript = [];
+
+    /**
+     * The tool calls this agent made on its last run, in order.
+     *
+     * @return list<string>
+     */
+    public function transcript(): array
+    {
+        return $this->transcript;
+    }
+
+    /**
+     * What this agent has spent so far, in tokens and dollars.
+     */
+    public function meter(): CostMeter
+    {
+        return $this->meter;
+    }
+
+    /**
+     * Whether the run has passed the caller's ceiling.
+     */
+    public function exceedsCost(float $ceiling): bool
+    {
+        return $this->meter->exceeds($ceiling);
+    }
+
 
     private const TEST_AUTHOR_PROMPT = <<<'PROMPT'
         You are a senior PHP engineer writing a reproduction test for one specific bug.
@@ -56,7 +97,7 @@ final class RepairAgent
     /**
      * Ask the model to write a reproduction test (not a fix).
      */
-    public function proposeTest(string $issue, string $framework): string
+    public function proposeTest(string $issue, string $framework, string $repoHints = ''): string
     {
         $messages = new MessageBag(
             new SystemMessage(self::TEST_AUTHOR_PROMPT),
@@ -67,12 +108,17 @@ final class RepairAgent
 
                 Test framework: {$framework}
 
+                The repository looks like this:
+
+                {$repoHints}
+
                 Write a reproduction test. Output only the PHP file.
                 PROMPT)),
         );
 
         $result = $this->agent->call($messages);
         $result->getMessages();
+        $this->meter->record($result->getMetadata());
 
         $content = $result->getContent();
 
@@ -112,6 +158,20 @@ final class RepairAgent
 
         // Drive execution to completion.
         $result->getMessages();
+        $this->meter->record($result->getMetadata());
+
+        // Keep the tool round-trips, so a refusal is visible rather than guessed at.
+        $this->transcript = [];
+        foreach ($result->getMessages() as $message) {
+            if ($message instanceof \Symfony\AI\Platform\Message\ToolCallMessage) {
+                $call = $message->getToolCall();
+                $this->transcript[] = \sprintf(
+                    'tool_call %s(%s)',
+                    $call->getName(),
+                    json_encode($call->getArguments(), JSON_UNESCAPED_SLASHES),
+                );
+            }
+        }
 
         $error = $result->getError();
         if ($error) {
