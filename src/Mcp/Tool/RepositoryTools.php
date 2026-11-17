@@ -7,6 +7,7 @@ namespace App\Mcp\Tool;
 use App\Sandbox\Sandbox;
 use App\Sandbox\SandboxViolation;
 use Mcp\Capability\Attribute\McpTool;
+use Mcp\Schema\ToolAnnotations;
 
 /**
  * The agent's entire capability surface, exposed as MCP tools.
@@ -24,7 +25,7 @@ final class RepositoryTools
      *
      * @return array{files: list<string>, count: int}
      */
-    #[McpTool(name: 'repo_list_files', title: 'List repository files')]
+    #[McpTool(name: 'repo_list_files', title: 'List repository files', annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     public function listFiles(string $path = '.'): array
     {
         $directory = $this->sandbox->resolve($path);
@@ -64,7 +65,7 @@ final class RepositoryTools
      *
      * @return array{pattern: string, matches: list<string>, count: int}
      */
-    #[McpTool(name: 'repo_search', title: 'Search repository contents')]
+    #[McpTool(name: 'repo_search', title: 'Search repository contents', annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     public function search(string $pattern, string $path = '.'): array
     {
         // `rg` is the only search binary, and it is invoked formatively.
@@ -99,7 +100,7 @@ final class RepositoryTools
      *
      * @return array{path: string, content: string}
      */
-    #[McpTool(name: 'repo_read_file', title: 'Read a repository file')]
+    #[McpTool(name: 'repo_read_file', title: 'Read a repository file', annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     public function readFile(string $path): array
     {
         $content = $this->sandbox->read($path);
@@ -123,7 +124,7 @@ final class RepositoryTools
      * New files are refused: a fix creates a change to existing source, not
      * extra files, and an unbounded file-creation primitive is a blast radius.
      */
-    #[McpTool(name: 'repo_write_file', title: 'Replace the contents of an existing file')]
+    #[McpTool(name: 'repo_write_file', title: 'Replace the contents of an existing file', annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false))]
     public function writeFile(string $path, string $content): array
     {
         try {
@@ -159,7 +160,7 @@ final class RepositoryTools
      *
      * @return array{clean: bool, entries: list<string>}
      */
-    #[McpTool(name: 'repo_git_status', title: 'Get git status')]
+    #[McpTool(name: 'repo_git_status', title: 'Get git status', annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     public function gitStatus(): array
     {
         $result = $this->sandbox->run('git', ['status', '--porcelain'], 30);
@@ -176,7 +177,7 @@ final class RepositoryTools
      *
      * @return array{diff: string, empty: bool}
      */
-    #[McpTool(name: 'repo_git_diff', title: 'Get git diff')]
+    #[McpTool(name: 'repo_git_diff', title: 'Get git diff', annotations: new ToolAnnotations(readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     public function gitDiff(): array
     {
         $result = $this->sandbox->run('git', ['diff'], 30);
@@ -196,7 +197,7 @@ final class RepositoryTools
      * @param list<string> $allowedPaths
      * @return array{applied: bool, message: string}
      */
-    #[McpTool(name: 'repo_apply_patch', title: 'Apply a unified diff')]
+    #[McpTool(name: 'repo_apply_patch', title: 'Apply a unified diff', annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false))]
     public function applyPatch(string $patch, array $allowedPaths = []): array
     {
         if ('' === trim($patch)) {
@@ -252,7 +253,7 @@ final class RepositoryTools
      * @param list<string> $arguments
      * @return array{command: string, exitCode: int, passed: bool, output: string}
      */
-    #[McpTool(name: 'repo_run', title: 'Run an allowlisted command')]
+    #[McpTool(name: 'repo_run', title: 'Run an allowlisted command', annotations: new ToolAnnotations(readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false))]
     public function run(string $binary, array $arguments = []): array
     {
         $result = $this->sandbox->run($binary, $arguments);
