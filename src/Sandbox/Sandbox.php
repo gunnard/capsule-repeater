@@ -216,7 +216,7 @@ final class Sandbox
      */
     private function execute(string $binary, array $arguments, int $timeoutSeconds, string $command): CheckResult
     {
-        $process = proc_open(
+        $process = @proc_open(
             [$binary, ...$arguments],
             [
                 0 => ['pipe', 'r'],
