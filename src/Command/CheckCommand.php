@@ -7,6 +7,7 @@ namespace App\Command;
 use App\Agent\RepairAgent;
 use App\Phase\TestAuthorPhase;
 use App\Sandbox\Sandbox;
+use App\Service\TestDiscovery;
 use App\Verify\VerificationRunner;
 use App\Verdict\CheckResult;
 use App\Verdict\Evidence;
@@ -29,6 +30,7 @@ final class CheckCommand
         private readonly VerificationRunner $runner,
         private readonly ?RepairAgent $repairAgent = null,
         private readonly ?TestAuthorPhase $testAuthor = null,
+        private readonly ?TestDiscovery $testDiscovery = null,
     ) {}
 
     public function __invoke(
@@ -49,6 +51,8 @@ final class CheckCommand
         float $maxCost = 0.0,
         #[Option(description: 'Author a reproduction test before patching (model-driven)')]
         bool $authorTests = false,
+        #[Option(description: 'Auto-detect the test command from repository config')]
+        bool $autoDiscover = false,
     ): int {
         $repoPath = realpath($repo);
         if (false === $repoPath || !is_dir($repoPath)) {
@@ -65,6 +69,22 @@ final class CheckCommand
         }
 
         $issueText = (string) file_get_contents($issuePath);
+
+        // Auto-discover the test command if requested.
+        if ($autoDiscover && null !== $this->testDiscovery) {
+            $sandbox = new \App\Sandbox\Sandbox($repoPath);
+            $discovered = $this->testDiscovery->discover($sandbox);
+            if (null === $discovered) {
+                $io->error('Could not discover a test command. Pass --test-command explicitly.');
+
+                return Command::INVALID;
+            }
+            $testCommand = $discovered;
+            if (!$json) {
+                $io->writeln(\sprintf('<comment>Discovered test command: %s</comment>', $testCommand));
+            }
+        }
+
         $checks = $this->runner->parseTestCommand($testCommand);
 
         if (null === $patch) {

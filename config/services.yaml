@@ -33,4 +33,6 @@ services:
 
     App\Phase\TestAuthorPhase:
         arguments:
-            $agent: '@App\\Agent\\RepairAgent'
+            $agent: '@App\Agent\RepairAgent'
+
+    App\Service\TestDiscovery: ~
