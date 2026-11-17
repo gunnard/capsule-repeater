@@ -25,3 +25,8 @@ services:
         arguments:
             $maxChangedLines: 150
             $maxFiles: 8
+
+    App\Agent\RepairAgent:
+        public: true
+        arguments:
+            $agent: '@ai.agent.repair'

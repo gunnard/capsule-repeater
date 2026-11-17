@@ -60,7 +60,18 @@ final class RepairAgent
 
         $result = $this->agent->call($messages);
 
-        $content = $result->getResult()->getContent();
+        // Drive execution to completion.
+        $result->getMessages();
+
+        $error = $result->getError();
+        if ($error) {
+            error_log('Agent error: '.$error);
+        }
+
+        $content = $result->getContent();
+        if (null === $content) {
+            $content = '(no content)';
+        }
 
         return \is_string($content) ? $content : json_encode($content, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }

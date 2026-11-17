@@ -6,11 +6,6 @@
 # ---------------------------------------------------------------------------
 ai:
     platform:
-        generic:
-            opencode:
-                # OpenCode inference endpoint (OpenAI-compatible chat completions).
-                base_url: 'https://opencode.ai/inference/openai/v1'
-                api_key: '%env(default::OPENCODE_API_KEY)%'
         anthropic:
             api_key: '%env(default::ANTHROPIC_API_KEY)%'
         openai:
@@ -18,9 +13,7 @@ ai:
 
     agent:
         repair:
-            # OpenCode Zen (OpenAI-compatible). Switch platform in config to use
-            # Anthropic/OpenAI with the corresponding API key and model.
-            platform: 'ai.platform.generic.opencode'
+            platform: 'ai.platform.openai'
             model: '%env(CAPSULE_MODEL)%'
             prompt:
                 text: 'You are a senior PHP engineer. Fix one bug, minimally, and prove it.'

@@ -123,7 +123,12 @@ final class CheckCommand
 
             // The MCP server subprocess reads CAPSULE_SANDBOX at boot. The client
             // spawns it when the agent first uses a tool, so set it now.
+            // CAPSULE_AGENT_SANDBOX is the override the MCP server honours above
+            // .env (see bin/mcp-server).
             $this->setSandboxEnv($work->root());
+            putenv('CAPSULE_AGENT_SANDBOX='.$work->root());
+            $_ENV['CAPSULE_AGENT_SANDBOX'] = $work->root();
+            $_SERVER['CAPSULE_AGENT_SANDBOX'] = $work->root();
 
             if (!$json) {
                 $io->section('Proposing a patch via MCP tools');
@@ -144,6 +149,8 @@ final class CheckCommand
                 reason: 'agent_error',
             );
         } finally {
+            putenv('CAPSULE_AGENT_SANDBOX');
+            unset($_ENV['CAPSULE_AGENT_SANDBOX'], $_SERVER['CAPSULE_AGENT_SANDBOX']);
             $this->restoreSandboxEnv($previousSandbox);
             $work?->destroy();
         }
