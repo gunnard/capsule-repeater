@@ -129,6 +129,8 @@ Limits
 | Test suite | **80 tests, 160 assertions** |
 | MCP tools | **8**, including `repo_write_file`; there is no `repo.search`/`repo.read_file` |
 | Bug | inverted shipping threshold — not `calculateTotal()` returning zero |
+| Zero-arg invocation | `capsule check` auto-detects repo (cwd), issue file, and test command — no flags needed |
+| MCP tool | `verify_patch` exposes the gate itself, so any MCP client can call it directly |
 | Toolbelt framing | the capability boundary is the protocol: the agent has no filesystem access of its own |
 
 ## Production rules
