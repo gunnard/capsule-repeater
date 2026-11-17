@@ -10,11 +10,11 @@ tells you what else could break, finds its own tests, and stays within budget."
 
 | # | Feature | Impact | Effort | Status |
 |---|---|---|---|---|
-| P1-9 | **Blast radius: consumer cross-reference** | ★★★★☆ | 3h | **start now** |
-| P0-2 | **Test-authoring phase (TDD gate)** | ★★★★★ | 5h | after P1-9 |
-| P2-10 | **Cost tracking + `--max-cost` gate** | ★★★☆☆ | 2h | after P0-2 |
-| P2-13 | **Test discovery (auto-detect `--test-command`)** | ★★★☆☆ | 3h | after P2-10 |
-| P2-11 | **Playwright / AIO binary allowlist** | ★★☆☆☆ | 1h | after P2-13 |
+| P1-9 | **Blast radius: consumer cross-reference** | ★★★★☆ | 3h | done |
+| P0-2 | **Test-authoring phase (TDD gate)** | ★★★★★ | 5h | done |
+| P2-10 | **Cost tracking + `--max-cost` gate** | ★★★☆☆ | 2h | done |
+| P2-13 | **Test discovery (auto-detect `--test-command`)** | ★★★☆☆ | 3h | done |
+| P2-11 | **Playwright / AIO binary allowlist** | ★★☆☆☆ | 1h | done |
 | P2-14 | **Evidence bundles (hash-chained, tamper-evident)** | ★★☆☆☆ | 3h | cut unless time |
 | P3-15 | **Web Profiler "Agent Trace" panel** | ★★☆☆☆ | 4h | cut |
 
