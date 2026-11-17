@@ -41,6 +41,8 @@ final class CheckCommand
         bool $json = false,
         #[Option(description: 'Apply this patch file instead of asking a model')]
         ?string $patch = null,
+        #[Option(description: 'Block if the patch touches more than N consumers (0 = unlimited)')]
+        int $maxBlastRadius = 0,
     ): int {
         $repoPath = realpath($repo);
         if (false === $repoPath || !is_dir($repoPath)) {
@@ -60,7 +62,7 @@ final class CheckCommand
         $checks = $this->runner->parseTestCommand($testCommand);
 
         if (null === $patch) {
-            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json);
+            $evidence = $this->proposeAndVerify($io, $repoPath, $issueText, $issue, $checks, $json, $maxBlastRadius);
 
             return $this->emit($io, $evidence, $json);
         }
@@ -77,6 +79,7 @@ final class CheckCommand
             issueSource: $issue,
             checks: $checks,
             patchText: (string) file_get_contents($patch),
+            maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
         );
 
         return $this->emit($io, $evidence, $json);
@@ -96,6 +99,7 @@ final class CheckCommand
         string $issueSource,
         array $checks,
         bool $json,
+        int $maxBlastRadius = 0,
     ): Evidence {
         if (null === $this->repairAgent) {
             return new Evidence(
@@ -175,6 +179,7 @@ final class CheckCommand
             issueSource: $issueSource,
             checks: $checks,
             patchText: $diff,
+            maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
         );
     }
 

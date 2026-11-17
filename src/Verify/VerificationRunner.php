@@ -33,6 +33,7 @@ final class VerificationRunner
         string $issueSource,
         array $checks,
         string $patchText,
+        ?int $maxBlastRadius = null,
     ): Evidence {
         // Guardrail: untrusted text is scanned before it reaches a model.
         $findings = $this->injectionGuard->scan($issueText, $issueSource);
@@ -91,7 +92,29 @@ final class VerificationRunner
         $sandbox = Sandbox::copy($repoPath);
 
         try {
-            return $this->evaluate($sandbox, $checks, $patchText, $inspection['files']);
+            $report = (new BlastRadius())->analyze($sandbox, $inspection['files']);
+            if (null !== $report && null !== $maxBlastRadius && $report->exceeds($maxBlastRadius)) {
+                return new Evidence(
+                    verdict: Verdict::Blocked,
+                    baseChecks: [],
+                    headChecks: [],
+                    revertChecks: [],
+                    summary: 'Refused: the patch blast radius exceeds the threshold.',
+                    limits: [
+                        \sprintf(
+                            'Patch touches %d consumers (threshold: %d). Risk level: %s.',
+                            $report->totalConsumers,
+                            $maxBlastRadius,
+                            $report->riskLevel,
+                        ),
+                    ],
+                    blastRadius: $report,
+                    diff: $patchText,
+                    reason: 'blast_radius_exceeded',
+                );
+            }
+
+            return $this->evaluate($sandbox, $checks, $patchText, $inspection['files'], $report);
         } finally {
             $sandbox->destroy();
         }
@@ -101,7 +124,7 @@ final class VerificationRunner
      * @param list<array{0: string, 1: list<string>}> $checks
      * @param list<string>                            $files
      */
-    private function evaluate(Sandbox $sandbox, array $checks, string $patchText, array $files): Evidence
+    private function evaluate(Sandbox $sandbox, array $checks, string $patchText, array $files, ?BlastRadiusReport $report = null): Evidence
     {
         return $this->validator->validateWithPatch(
             sandbox: $sandbox,
@@ -132,7 +155,7 @@ final class VerificationRunner
                 $sandbox->run('git', ['checkout', '--', '.'], 30);
             },
             summary: \sprintf('Evaluated %d check(s) across base, head and revert.', \count($checks)),
-            blastRadius: $this->blastRadius($sandbox, $files),
+            blastRadius: $report,
             diff: $patchText,
         );
     }

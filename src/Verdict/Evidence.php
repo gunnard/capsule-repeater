@@ -16,7 +16,7 @@ final readonly class Evidence
      * @param list<CheckResult> $headChecks   run with the patch applied — must pass
      * @param list<CheckResult> $revertChecks run with the patch reverted — must fail again
      * @param list<string>      $limits       what this run could not verify
-     * @param list<string>      $blastRadius  every consumer of the symbols the patch touches
+     * @param ?BlastRadiusReport $blastRadius  consumer cross-reference for the patch
      */
     public function __construct(
         public Verdict $verdict,
@@ -25,7 +25,7 @@ final readonly class Evidence
         public array $revertChecks,
         public string $summary,
         public array $limits = [],
-        public array $blastRadius = [],
+        public ?\App\Verify\BlastRadiusReport $blastRadius = null,
         public ?string $diff = null,
         public ?string $reason = null,
     ) {}
@@ -84,7 +84,7 @@ final readonly class Evidence
                 'revert' => array_map(static fn (CheckResult $r) => $r->toArray(), $this->revertChecks),
             ],
             'loadBearing' => $this->isLoadBearing(),
-            'blastRadius' => $this->blastRadius,
+            'blastRadius' => $this->blastRadius?->toArray(),
             'limits' => $this->limits,
             'diff' => $this->diff,
         ];

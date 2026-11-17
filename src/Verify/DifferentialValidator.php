@@ -43,7 +43,7 @@ final class DifferentialValidator
         callable $revertPatch,
         string $summary,
         array $limits = [],
-        array $blastRadius = [],
+        ?BlastRadiusReport $blastRadius = null,
         ?string $diff = null,
     ): Evidence {
         $base = $this->runAll($sandbox, $checks);
