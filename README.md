@@ -61,7 +61,7 @@ asks a model to write the fix, and judges it the same way.
 
 ```bash
 export OPENAI_API_KEY=sk-...
-export CAPSULE_MODEL=gpt-4o   # gpt-4o-mini is cheaper but does not complete this task
+export CAPSULE_MODEL=gpt-4o   # gpt-4o-mini is cheaper but does not complete the task (see below)
 
 php bin/capsule check \
   --repo=fixtures/shipping \
@@ -69,6 +69,12 @@ php bin/capsule check \
   --test-command="php check.php" \
   --author-tests
 ```
+
+> Note on models: this task needs `gpt-4o` or stronger. `gpt-4o-mini` is
+> cheaper but does not complete it — it breaks the source and the gate
+> correctly returns `UNVERIFIED`. The committed default is `gpt-4o`, so a
+> fresh clone with a key works out of the box; override with
+> `CAPSULE_MODEL=...` if you want to test a different one.
 
 `--author-tests` is the TDD gate. Before the model is allowed to patch anything,
 it must write a test that **fails on the unpatched code**. That test is then
