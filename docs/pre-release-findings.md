@@ -5,10 +5,11 @@ is a real failure encountered while building this project, not a review comment.
 
 Verified: **2026-11-16** · PHP 8.5.8 · Composer 2.10.0 · macOS 26.1
 
-Two of these were filed upstream:
+Three of these were filed upstream:
 
 - [modelcontextprotocol/php-sdk#746](https://github.com/modelcontextprotocol/php-sdk/issues/746) — docs import a namespace that does not exist
 - [symfony/ai#2965](https://github.com/symfony/ai/issues/2965) — `mcp_server` toolbox config rejects empty prefix, and the package check masks the config error
+- [symfony/ai#2974](https://github.com/symfony/ai/issues/2974) — `symfony/ai-mcp-tool` drops `outputSchema` declared by an MCP tool
 
 ---
 
@@ -145,6 +146,40 @@ replacement. Not mentioned in the upgrade notes I could find.
 
 ---
 
+## 6. `symfony/ai-mcp-tool` drops `outputSchema` declared by an MCP tool
+
+The official PHP MCP SDK lets a tool declare an `outputSchema`
+(https://modelcontextprotocol.io/specification/2025-06-18/server/tools). When a
+remote MCP tool declares one, `symfony/ai-mcp-tool` builds a
+`Platform\Tool\Tool` from the remote listing, but the schema is silently
+dropped: `Tool` has no field for it and `McpToolbox::getTools()` never forwards
+`$remote->outputSchema`.
+
+- `vendor/symfony/ai-platform/src/Tool/Tool.php` — no `outputSchema` param; `getEffectHints()` is the only metadata-derived accessor.
+- `vendor/symfony/ai-mcp-tool/McpToolbox.php::getTools()` builds `new Tool(..., $this->annotationsToMetadata(...))` with no schema argument.
+
+Effect hints (`readOnlyHint`/`destructiveHint`/...) ARE forwarded correctly via
+`annotationsToMetadata`, so this is not a general metadata gap — just this one
+field. Filed upstream as [symfony/ai#2974](https://github.com/symfony/ai/issues/2974).
+
+---
+
+## 7. A note on what was *not* filed
+
+The project's other big finding — that a unified-diff patch tool is a poor
+capability surface for a language model (models produce semantically correct
+diffs that fail on a missing trailing newline, wrong hunk counts, or shifted
+context) — is a **tool-design lesson, not a bug in Symfony AI**. Symfony AI
+already forwards MCP annotations, including `destructiveHint`, which is the
+right primitive for expressing "this tool mutates state". The lesson is ours:
+publish `ToolAnnotations` on every tool, prefer whole-file writes over
+diff-apply, and run `git apply --recount` so wrong hunk counts are forgiven
+without forgiving a wrong fix. It is recorded here and in `docs/VIDEO_SCRIPT.md`
+rather than filed upstream, because filing a design preference as a bug would
+be noise.
+
+---
+
 ## What worked, and deserves saying
 
 These were genuinely smooth, and they are the reason the project exists:
@@ -153,7 +188,7 @@ These were genuinely smooth, and they are the reason the project exists:
   `ai.agent.*.tools.services[].mcp_server` plus `mcp.clients.*` is one config block,
   and it works. No hand-written JSON-RPC, no transport code.
 - **STDIO round trip through the real bundle** — `debug:mcp --client=capsule` starts
-  the server as a subprocess, negotiates capabilities, and lists all seven tools.
+  the server as a subprocess, negotiates capabilities, and lists all eight tools.
 - **`#[McpTool]` on an ordinary service method.** Schema generation from the PHP
   signature and DocBlock is accurate enough that a real client call succeeds first try.
 - **`mcp:server` handles the STDIO discipline** — a single `echo` in the wrong place
