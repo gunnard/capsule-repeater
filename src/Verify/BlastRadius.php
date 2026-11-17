@@ -86,29 +86,37 @@ final class BlastRadius
         $consumers = [];
         $changedSet = array_flip($changedFiles);
 
+        $rgAvailable = $this->isRgAvailable();
+
         foreach ($symbols as $symbol) {
             // Skip very short or common names that would produce noise.
             if (\strlen($symbol) < 4) {
                 continue;
             }
 
-            $result = $this->sandbox->run('rg', [
-                '--line-number',
-                '--no-heading',
-                '--color', 'never',
-                '--word-regexp',
-                '--fixed-strings',
-                '--glob', '!vendor/**',
-                '--glob', '!.git/**',
-                '--glob', '!tests/**',
-                '--glob', '!*.patch',
-                '--glob', '!bootstrap.php',
-                '--glob', '!check.php',
-                $symbol,
-                '.',
-            ], 30);
+            if ($rgAvailable) {
+                $result = $this->sandbox->run('rg', [
+                    '--line-number',
+                    '--no-heading',
+                    '--color', 'never',
+                    '--word-regexp',
+                    '--fixed-strings',
+                    '--glob', '!vendor/**',
+                    '--glob', '!.git/**',
+                    '--glob', '!tests/**',
+                    '--glob', '!*.patch',
+                    '--glob', '!bootstrap.php',
+                    '--glob', '!check.php',
+                    $symbol,
+                    '.',
+                ], 30);
 
-            foreach (explode("\n", $result->output) as $line) {
+                $lines = explode("\n", $result->output);
+            } else {
+                $lines = $this->phpGrep($symbol);
+            }
+
+            foreach ($lines as $line) {
                 $line = trim($line);
                 if ('' === $line) {
                     continue;
@@ -154,6 +162,59 @@ final class BlastRadius
         }
 
         return $unique;
+    }
+
+    private function isRgAvailable(): bool
+    {
+        $result = $this->sandbox->run('rg', ['--version'], 5);
+
+        return $result->passed();
+    }
+
+    /**
+     * PHP-based fallback for ripgrep when rg is not installed.
+     *
+     * @return list<string>
+     */
+    private function phpGrep(string $symbol): array
+    {
+        $results = [];
+        $root = $this->sandbox->root();
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+        );
+
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+
+            $relative = str_replace(rtrim($root, '/').'/', '', $file->getPathname());
+
+            // Skip excluded paths.
+            if (1 === preg_match('#(^|/)(vendor|node_modules|\.git|tests)(/|$)#', $relative)) {
+                continue;
+            }
+            if (str_ends_with($relative, '.patch') || str_ends_with($relative, 'bootstrap.php') || str_ends_with($relative, 'check.php')) {
+                continue;
+            }
+            if (!str_ends_with($relative, '.php')) {
+                continue;
+            }
+
+            $contents = file_get_contents($file->getPathname());
+            if (false === $contents) {
+                continue;
+            }
+
+            foreach (explode("\n", $contents) as $lineNum => $line) {
+                if (str_contains($line, $symbol) && 1 === preg_match('/\b'.preg_quote($symbol, '/').'\b/', $line)) {
+                    $results[] = $relative.':'.($lineNum + 1).':'.$line;
+                }
+            }
+        }
+
+        return $results;
     }
 
     private function riskLevel(int $consumerCount): string
