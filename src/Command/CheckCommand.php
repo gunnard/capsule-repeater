@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Agent\RepairAgent;
+use App\Phase\TestAuthorPhase;
 use App\Sandbox\Sandbox;
 use App\Verify\VerificationRunner;
 use App\Verdict\CheckResult;
@@ -27,6 +28,7 @@ final class CheckCommand
     public function __construct(
         private readonly VerificationRunner $runner,
         private readonly ?RepairAgent $repairAgent = null,
+        private readonly ?TestAuthorPhase $testAuthor = null,
     ) {}
 
     public function __invoke(
@@ -45,6 +47,8 @@ final class CheckCommand
         int $maxBlastRadius = 0,
         #[Option(description: 'Abort if estimated cost exceeds N dollars (0 = unlimited)')]
         float $maxCost = 0.0,
+        #[Option(description: 'Author a reproduction test before patching (model-driven)')]
+        bool $authorTests = false,
     ): int {
         $repoPath = realpath($repo);
         if (false === $repoPath || !is_dir($repoPath)) {
@@ -138,6 +142,32 @@ final class CheckCommand
             $_ENV['CAPSULE_AGENT_SANDBOX'] = $work->root();
             $_SERVER['CAPSULE_AGENT_SANDBOX'] = $work->root();
 
+            // Test-authoring phase: write a reproduction test first.
+            if ($authorTests && null !== $this->testAuthor) {
+                if (!$json) {
+                    $io->section('Authoring a reproduction test');
+                }
+
+                $testRoot = $this->detectTestRoot($work);
+                $result = $this->testAuthor->author($work, $issueText, $testRoot);
+
+                if (!$result->success) {
+                    return new Evidence(
+                        verdict: Verdict::NoPatch,
+                        baseChecks: [],
+                        headChecks: [],
+                        revertChecks: [],
+                        summary: 'Could not author a reproduction test.',
+                        limits: [$result->message],
+                        reason: $result->reason,
+                    );
+                }
+
+                if (!$json) {
+                    $io->writeln('  ✓ '.$result->message);
+                }
+            }
+
             if (!$json) {
                 $io->section('Proposing a patch via MCP tools');
             }
@@ -186,6 +216,24 @@ final class CheckCommand
             maxBlastRadius: $maxBlastRadius > 0 ? $maxBlastRadius : null,
             maxCost: $maxCost,
         );
+    }
+
+    private function detectTestRoot(Sandbox $work): string
+    {
+        if ($work->exists('tests')) {
+            return 'tests';
+        }
+
+        if ($work->exists('test')) {
+            return 'test';
+        }
+
+        if ($work->exists('spec')) {
+            return 'spec';
+        }
+
+        // Default: create a tests directory.
+        return 'tests';
     }
 
     private function investigationContext(Sandbox $work): string

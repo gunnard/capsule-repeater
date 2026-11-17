@@ -30,3 +30,7 @@ services:
         public: true
         arguments:
             $agent: '@ai.agent.repair'
+
+    App\Phase\TestAuthorPhase:
+        arguments:
+            $agent: '@App\\Agent\\RepairAgent'

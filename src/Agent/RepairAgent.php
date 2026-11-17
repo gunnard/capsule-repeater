@@ -38,6 +38,56 @@ final class RepairAgent
         private readonly AgentInterface $agent,
     ) {}
 
+    private const TEST_AUTHOR_PROMPT = <<<'PROMPT'
+        You are a senior PHP engineer writing a reproduction test for one specific bug.
+
+        You have tools to list files, search, and read. You must NOT modify any source file.
+
+        Write a single test file that:
+        - Reproduces the bug described in the issue
+        - Fails on the current (buggy) code
+        - Would pass if the bug were fixed
+        - Follows the project's existing test conventions
+
+        Output ONLY the PHP test file contents, starting with <?php and nothing else.
+        Do not include explanations, markdown fences, or commentary.
+        PROMPT;
+
+    /**
+     * Ask the model to write a reproduction test (not a fix).
+     */
+    public function proposeTest(string $issue, string $framework): string
+    {
+        $messages = new MessageBag(
+            new SystemMessage(self::TEST_AUTHOR_PROMPT),
+            new UserMessage(new Text(<<<PROMPT
+                Issue:
+
+                {$issue}
+
+                Test framework: {$framework}
+
+                Write a reproduction test. Output only the PHP file.
+                PROMPT)),
+        );
+
+        $result = $this->agent->call($messages);
+        $result->getMessages();
+
+        $content = $result->getContent();
+
+        if (null === $content) {
+            return '';
+        }
+
+        // Strip markdown fences if the model added them despite instructions.
+        $content = \is_string($content) ? $content : json_encode($content);
+        $content = preg_replace('/^```(?:php)?\s*\n?/m', '', $content);
+        $content = preg_replace('/\n?```\s*$/m', '', $content);
+
+        return trim($content);
+    }
+
     /**
      * Ask the model to investigate and produce a patch.
      */
