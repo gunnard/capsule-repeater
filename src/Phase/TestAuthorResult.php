@@ -12,12 +12,13 @@ final readonly class TestAuthorResult
     public function __construct(
         public bool $success,
         public ?string $testFile,
-        public ?string $testCode,
+        public ?Reproduction $reproduction,
         public string $reason,
         public string $message,
         public string $baselineOutput = '',
     ) {}
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [

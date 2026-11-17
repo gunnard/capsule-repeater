@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Verify;
 
+use App\Agent\CostMeter;
+use App\Phase\Reproduction;
 use App\Sandbox\Sandbox;
 use App\Verdict\Evidence;
 use App\Verdict\Verdict;
@@ -14,6 +16,10 @@ use App\Verdict\Verdict;
  * Both `check` and `suite` go through this object, so the corpus measures the
  * real gate rather than a parallel implementation of it. That distinction is the
  * difference between a benchmark and a claim.
+ *
+ * Order matters and is deliberate: cheap deterministic refusals come before the
+ * sandbox is even created, and the expensive reasoning never gets a chance to
+ * influence a verdict.
  */
 final class VerificationRunner
 {
@@ -22,6 +28,7 @@ final class VerificationRunner
         private readonly InjectionGuard $injectionGuard,
         private readonly PatchGuard $patchGuard,
         private readonly ReproductionGuard $reproductionGuard,
+        private readonly ?BlastRadius $blastRadius = null,
     ) {}
 
     /**
@@ -35,7 +42,32 @@ final class VerificationRunner
         string $patchText,
         ?int $maxBlastRadius = null,
         float $maxCost = 0.0,
+        ?Reproduction $reproduction = null,
+        ?CostMeter $meter = null,
     ): Evidence {
+        // A ceiling that the run has already blown is a refusal, not a warning.
+        if (null !== $meter && $meter->exceeds($maxCost)) {
+            return new Evidence(
+                verdict: Verdict::Blocked,
+                baseChecks: [],
+                headChecks: [],
+                revertChecks: [],
+                summary: 'Refused: the run exceeded the cost ceiling before verification began.',
+                limits: [
+                    \sprintf(
+                        'Spent $%.6f (%d call(s), %d tokens) against a ceiling of $%.6f.',
+                        $meter->cost(),
+                        $meter->calls(),
+                        $meter->totalTokens(),
+                        $maxCost,
+                    ),
+                ],
+                reason: 'cost_exceeded',
+                cost: $meter->cost(),
+                meter: $meter,
+            );
+        }
+
         // Guardrail: untrusted text is scanned before it reaches a model.
         $findings = $this->injectionGuard->scan($issueText, $issueSource);
         if ([] !== $findings) {
@@ -57,19 +89,19 @@ final class VerificationRunner
 
         // A patch that changes the reproduction is refused outright: the
         // differential proof is only as good as the test it runs.
-        $reproduction = $this->reproductionGuard->inspect(
+        $guard = $this->reproductionGuard->inspect(
             $inspection['files'],
             $this->executedPaths($checks),
         );
 
-        if (!$reproduction['allowed']) {
+        if (!$guard['allowed']) {
             return new Evidence(
                 verdict: Verdict::Blocked,
                 baseChecks: [],
                 headChecks: [],
                 revertChecks: [],
                 summary: 'Refused: the patch modifies the reproduction.',
-                limits: $reproduction['reasons'],
+                limits: $guard['reasons'],
                 reason: 'reproduction_modified',
                 diff: $patchText,
             );
@@ -95,45 +127,25 @@ final class VerificationRunner
         $sandbox = Sandbox::copy($repoPath);
 
         try {
-            $report = (new BlastRadius())->analyze($sandbox, $inspection['files']);
-            if (null !== $report && null !== $maxBlastRadius && $report->exceeds($maxBlastRadius)) {
-                return new Evidence(
-                    verdict: Verdict::Blocked,
-                    baseChecks: [],
-                    headChecks: [],
-                    revertChecks: [],
-                    summary: 'Refused: the patch blast radius exceeds the threshold.',
-                    limits: [
-                        \sprintf(
-                            'Patch touches %d consumers (threshold: %d). Risk level: %s.',
-                            $report->totalConsumers,
-                            $maxBlastRadius,
-                            $report->riskLevel,
-                        ),
-                    ],
-                    blastRadius: $report,
-                    diff: $patchText,
-                    reason: 'blast_radius_exceeded',
-                    wallTime: microtime(true) - $startTime,
-                );
+            // An authored test is installed here, before the base phase, and then
+            // left alone. It is part of the specification, not of the patch: if it
+            // travelled inside the diff, reverting the diff would delete the test
+            // and the revert phase would fail for the wrong reason.
+            if (null !== $reproduction) {
+                $sandbox->write($reproduction->path, $reproduction->contents);
+                $checks = $reproduction->checks;
             }
 
-            $evidence = $this->evaluate($sandbox, $checks, $patchText, $inspection['files'], $report);
-            $evidence = new Evidence(
-                verdict: $evidence->verdict,
-                baseChecks: $evidence->baseChecks,
-                headChecks: $evidence->headChecks,
-                revertChecks: $evidence->revertChecks,
-                summary: $evidence->summary,
-                limits: $evidence->limits,
-                blastRadius: $evidence->blastRadius,
-                diff: $evidence->diff,
-                reason: $evidence->reason,
-                cost: $evidence->cost,
-                wallTime: microtime(true) - $startTime,
+            return $this->evaluate(
+                sandbox: $sandbox,
+                checks: $checks,
+                patchText: $patchText,
+                files: $inspection['files'],
+                maxBlastRadius: $maxBlastRadius,
+                startTime: $startTime,
+                meter: $meter,
+                reproduction: $reproduction,
             );
-
-            return $evidence;
         } finally {
             $sandbox->destroy();
         }
@@ -143,9 +155,44 @@ final class VerificationRunner
      * @param list<array{0: string, 1: list<string>}> $checks
      * @param list<string>                            $files
      */
-    private function evaluate(Sandbox $sandbox, array $checks, string $patchText, array $files, ?BlastRadiusReport $report = null): Evidence
-    {
-        return $this->validator->validateWithPatch(
+    private function evaluate(
+        Sandbox $sandbox,
+        array $checks,
+        string $patchText,
+        array $files,
+        ?int $maxBlastRadius,
+        float $startTime,
+        ?CostMeter $meter,
+        ?Reproduction $reproduction,
+    ): Evidence {
+        $report = ($this->blastRadius ?? new BlastRadius())->analyze($sandbox, $files);
+
+        if (null !== $report && null !== $maxBlastRadius && $report->exceeds($maxBlastRadius)) {
+            return new Evidence(
+                verdict: Verdict::Blocked,
+                baseChecks: [],
+                headChecks: [],
+                revertChecks: [],
+                summary: 'Refused: the patch blast radius exceeds the threshold.',
+                limits: [
+                    \sprintf(
+                        'Patch touches %d consumers (threshold: %d). Risk level: %s.',
+                        $report->totalConsumers,
+                        $maxBlastRadius,
+                        $report->riskLevel,
+                    ),
+                ],
+                blastRadius: $report,
+                diff: $patchText,
+                reason: 'blast_radius_exceeded',
+                wallTime: microtime(true) - $startTime,
+                meter: $meter,
+                cost: $meter?->cost() ?? 0.0,
+                reproductionPath: $reproduction?->path,
+            );
+        }
+
+        $evidence = $this->validator->validateWithPatch(
             sandbox: $sandbox,
             checks: $checks,
             applyPatch: static function () use ($sandbox, $patchText): array {
@@ -176,6 +223,22 @@ final class VerificationRunner
             summary: \sprintf('Evaluated %d check(s) across base, head and revert.', \count($checks)),
             blastRadius: $report,
             diff: $patchText,
+        );
+
+        return new Evidence(
+            verdict: $evidence->verdict,
+            baseChecks: $evidence->baseChecks,
+            headChecks: $evidence->headChecks,
+            revertChecks: $evidence->revertChecks,
+            summary: $evidence->summary,
+            limits: $evidence->limits,
+            blastRadius: $evidence->blastRadius,
+            diff: $evidence->diff,
+            reason: $evidence->reason,
+            cost: $meter?->cost() ?? 0.0,
+            wallTime: microtime(true) - $startTime,
+            meter: $meter,
+            reproductionPath: $reproduction?->path,
         );
     }
 

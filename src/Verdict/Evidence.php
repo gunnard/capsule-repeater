@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Verdict;
 
+use App\Phase\Reproduction;
+
 /**
  * Everything a verdict rests on. If a claim is not in here, it was not proven.
  *
@@ -30,6 +32,8 @@ final readonly class Evidence
         public ?string $reason = null,
         public float $cost = 0.0,
         public float $wallTime = 0.0,
+        public ?\App\Agent\CostMeter $meter = null,
+        public ?string $reproductionPath = null,
     ) {}
 
     /**
@@ -90,6 +94,8 @@ final readonly class Evidence
             'limits' => $this->limits,
             'diff' => $this->diff,
             'cost' => $this->cost,
+            'usage' => $this->meter?->summary(),
+            'reproduction' => $this->reproductionPath,
             'wallTime' => $this->wallTime,
         ];
     }
